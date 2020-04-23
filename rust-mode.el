@@ -112,6 +112,7 @@ symbols."
   (let ((beg-of-symbol (save-excursion (forward-thing 'symbol -1) (point))))
     (looking-back rust-re-ident beg-of-symbol)))
 
+
 (defun rust-looking-back-macro ()
   "Non-nil if looking back at an ident followed by a !"
   (if (> (- (point) (point-min)) 1)
@@ -267,18 +268,30 @@ to the function arguments.  When nil, `->' will be indented one level."
         ;; Rewind until the point no longer moves
         (setq continue (/= starting (point)))))))
 
+(defun rust-backward-to-macro-bang ()
+  (let ((found (search-backward "!" (point-min) t)))
+    (cond
+     ;; There is no ! before point, so we are not in macro
+     ((not found) nil)
+     ;; We did find, but we are in a comment, so try again
+     ((and found (rust-in-str-or-cmnt))
+      (rust-backward-to-macro-bang))
+     ;; We did find, and we are not in a comment
+     (t t))))
+
 (defun rust-in-macro ()
   (save-excursion
-    (when (> (rust-paren-level) 0)
-      (backward-up-list)
-      (rust-rewind-irrelevant)
-      (or (rust-looking-back-macro)
-          (and (rust-looking-back-ident)
-               (save-excursion
-                 (backward-sexp)
-                 (rust-rewind-irrelevant)
-                 (rust-looking-back-str "macro_rules!")))
-          (rust-in-macro)))))
+    (let ((end-bound (point)))
+      (when (and
+             ;; Find first ! backward
+             (rust-backward-to-macro-bang)
+             ;; Find next paren
+             (re-search-forward "[([{]" end-bound t))
+        (backward-char)
+        ;; Find matching paren
+        (forward-list)
+        ;; if point is now passed where we started, we are in a macro
+        (> (point) end-bound)))))
 
 (defun rust-looking-at-where ()
   "Return T when looking at the \"where\" keyword."
