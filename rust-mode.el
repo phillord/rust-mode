@@ -268,30 +268,33 @@ to the function arguments.  When nil, `->' will be indented one level."
         ;; Rewind until the point no longer moves
         (setq continue (/= starting (point)))))))
 
-(defun rust-backward-to-macro-bang ()
-  (let ((found (search-backward "!" (point-min) t)))
-    (cond
-     ;; There is no ! before point, so we are not in macro
-     ((not found) nil)
-     ;; We did find, but we are in a comment, so try again
-     ((and found (rust-in-str-or-cmnt))
-      (rust-backward-to-macro-bang))
-     ;; We did find, and we are not in a comment
-     (t t))))
+(defvar-local rust-macro-scopes nil)
+
+(defun rust-macro-scope ()
+  ;; need to special case macro_rules which has unique syntax
+  (let ((scope nil))
+    (goto-char (point-min))
+    (while (search-forward "!" nil t)
+      (when (and (not (rust-in-str-or-cmnt))
+                 (skip-chars-forward " \t\n\r")
+                 (or
+                  (eq ?\[ (char-after))
+                  (eq ?\( (char-after))
+                  (eq ?\{ (char-after))))
+        (let ((start (point)))
+          (forward-list)
+          (setq scope (cons (list start (point)) scope)))))
+    scope))
 
 (defun rust-in-macro ()
-  (save-excursion
-    (let ((end-bound (point)))
-      (when (and
-             ;; Find first ! backward
-             (rust-backward-to-macro-bang)
-             ;; Find next paren
-             (re-search-forward "[([{]" end-bound t))
-        (backward-char)
-        ;; Find matching paren
-        (forward-list)
-        ;; if point is now passed where we started, we are in a macro
-        (> (point) end-bound)))))
+  (message "in macro")
+  (let ((scopes
+         (or rust-macro-scopes (rust-macro-scope))))
+    (seq-some
+     (lambda (sc)
+       (and (>= (car sc) (point))
+            (<= (cadr sc) (point))))
+     scopes)))
 
 (defun rust-looking-at-where ()
   "Return T when looking at the \"where\" keyword."
@@ -1226,32 +1229,33 @@ whichever comes first."
 
 (defun rust-syntax-propertize (start end)
   "A `syntax-propertize-function' to apply properties from START to END."
-  (goto-char start)
-  (let ((str-start (rust-in-str-or-cmnt)))
-    (when str-start
-      (rust--syntax-propertize-raw-string str-start end)))
-  (funcall
-   (syntax-propertize-rules
-    ;; Character literals.
-    (rust--char-literal-rx (1 "\"") (2 "\""))
-    ;; Raw strings.
-    ("\\(r\\)#*\""
-     (0 (ignore
-         (goto-char (match-end 0))
-         (unless (save-excursion (nth 8 (syntax-ppss (match-beginning 0))))
-           (put-text-property (match-beginning 1) (match-end 1)
-                              'syntax-table (string-to-syntax "|"))
-           (rust--syntax-propertize-raw-string (match-beginning 0) end)))))
-    ("[<>]"
-     (0 (ignore
-         (when (save-match-data
-                 (save-excursion
-                   (goto-char (match-beginning 0))
-                   (rust-ordinary-lt-gt-p)))
-           (put-text-property (match-beginning 0) (match-end 0)
-                              'syntax-table (string-to-syntax "."))
-           (goto-char (match-end 0)))))))
-   (point) end))
+  (let ((rust-macro-scopes (rust-macro-scope)))
+    (goto-char start)
+    (let ((str-start (rust-in-str-or-cmnt)))
+      (when str-start
+        (rust--syntax-propertize-raw-string str-start end)))
+    (funcall
+     (syntax-propertize-rules
+      ;; Character literals.
+      (rust--char-literal-rx (1 "\"") (2 "\""))
+      ;; Raw strings.
+      ("\\(r\\)#*\""
+       (0 (ignore
+           (goto-char (match-end 0))
+           (unless (save-excursion (nth 8 (syntax-ppss (match-beginning 0))))
+             (put-text-property (match-beginning 1) (match-end 1)
+                                'syntax-table (string-to-syntax "|"))
+             (rust--syntax-propertize-raw-string (match-beginning 0) end)))))
+      ("[<>]"
+       (0 (ignore
+           (when (save-match-data
+                   (save-excursion
+                     (goto-char (match-beginning 0))
+                     (rust-ordinary-lt-gt-p)))
+             (put-text-property (match-beginning 0) (match-end 0)
+                                'syntax-table (string-to-syntax "."))
+             (goto-char (match-end 0)))))))
+     (point) end)))
 
 (defun rust-fill-prefix-for-comment-start (line-start)
   "Determine what to use for `fill-prefix' based on the text at LINE-START."
