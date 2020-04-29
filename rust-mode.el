@@ -271,30 +271,31 @@ to the function arguments.  When nil, `->' will be indented one level."
 (defvar-local rust-macro-scopes nil)
 
 (defun rust-macro-scope ()
-  ;; need to special case macro_rules which has unique syntax
-  (let ((scope nil))
-    (goto-char (point-min))
-    (while (search-forward "!" nil t)
-      (when (and (not (rust-in-str-or-cmnt))
-                 (skip-chars-forward " \t\n\r")
-                 (or
-                  (eq ?\[ (char-after))
-                  (eq ?\( (char-after))
-                  (eq ?\{ (char-after))))
-        (let ((start (point)))
-          (forward-list)
-          (setq scope (cons (list start (point)) scope)))))
-    scope))
+  (save-excursion
+    ;; need to special case macro_rules which has unique syntax
+    (let ((scope nil))
+      (goto-char (point-min))
+      (while (search-forward "!" nil t)
+        (when (and (not (rust-in-str-or-cmnt))
+                   (skip-chars-forward " \t\n\r")
+                   (or
+                    (eq ?\[ (char-after))
+                    (eq ?\( (char-after))
+                    (eq ?\{ (char-after))))
+          (let ((start (point)))
+            (forward-list)
+            (setq scope (cons (list start (point)) scope)))))
+      scope)))
 
 (defun rust-in-macro ()
-  (message "in macro")
-  (let ((scopes
-         (or rust-macro-scopes (rust-macro-scope))))
-    (seq-some
-     (lambda (sc)
-       (and (>= (car sc) (point))
-            (<= (cadr sc) (point))))
-     scopes)))
+  (when (> (rust-paren-level) 0)
+    (let ((scopes
+           (or rust-macro-scopes (rust-macro-scope))))
+      (seq-some
+       (lambda (sc)
+         (and (>= (point) (car sc))
+              (<= (point) (cadr sc))))
+       scopes))))
 
 (defun rust-looking-at-where ()
   "Return T when looking at the \"where\" keyword."
